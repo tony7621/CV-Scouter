@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+openai
+tavily-python
+streamlit
+supabase
+requests
+bcrypt
