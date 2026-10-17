@@ -2,6 +2,10 @@ import streamlit as st
 import requests
 import time
 import pandas as pd
+import os
+import re
+
+DEMO_MODE = os.getenv("DEMO_MODE", "False").lower() in ("true", "1", "t")
 
 API_URL = "http://127.0.0.1:8000/api/v1"
 
@@ -107,7 +111,12 @@ def main_app():
             st.session_state.current_search = None
             st.rerun()
     with c3:
+<<<<<<< Updated upstream
         st.markdown(f"👤 {st.session_state.email} | 💰 **{st.session_state.tokens} 點**")
+=======
+        demo_badge = " (🎥 DEMO MODE)" if DEMO_MODE else ""
+        st.markdown(f"👤 {st.session_state.email}{demo_badge} | 💰 **{st.session_state.tokens} Tokens**")
+>>>>>>> Stashed changes
     st.divider()
 
     menu = st.sidebar.radio("導覽", ["🏠 開始搜尋", "📜 歷史紀錄 (Excel模式)", "👤 帳戶資訊"])
@@ -133,9 +142,20 @@ def main_app():
                     candidates = h.get('candidates_cache', [])
                     if candidates:
                         df = pd.DataFrame(candidates)
+<<<<<<< Updated upstream
                         display_df = df[['name', 'current_job', 'linkedin_url', 'ai_cv']].rename(
                             columns={'name': '姓名', 'current_job': '現職', 'linkedin_url': 'LinkedIn 連結', 'ai_cv': 'AI 摘要'}
                         )
+=======
+                        if DEMO_MODE:
+                            df['name'] = [f"Candidate {i+1}" for i in range(len(df))]
+                            df['current_job'] = df['current_job'].apply(
+                                lambda x: re.sub(r'(?i)\s*@\s*.*', ' @ [Company]', re.sub(r'(?i)\s+at\s+.*', ' at [Company]', str(x)))
+                            )
+                            df['linkedin_url'] = "[Protected in Demo]"
+                            
+                        display_df = df[['name', 'current_job', 'linkedin_url', 'ai_score', 'ai_cv']]
+>>>>>>> Stashed changes
                         st.dataframe(display_df, use_container_width=True)
                     else:
                         st.write("無名單紀錄。")
@@ -200,6 +220,7 @@ def main_app():
                 st.markdown(f"#### {idx+1}. {p['name']} | {p['current_job']}")
                 with st.expander("✨ Mini CV"): st.write(p['ai_cv'])
                 
+<<<<<<< Updated upstream
                 pid = p.get('profile_id', 'legacy_id')
                 link = p.get('link', p.get('linkedin_url', ''))
                 
@@ -219,6 +240,47 @@ def main_app():
     elif menu == "👤 帳戶資訊":
         st.header("帳戶總覽")
         st.write("極簡後台，不玩花樣。")
+=======
+                for idx, p in enumerate(sorted_search):
+                    score = p.get('ai_score', 0)
+                    st.markdown(f"#### {idx+1}. {p['name']} | {p['current_job']} | Score: {score}")
+                    with st.expander("✨ Mini CV"): 
+                        st.write(p['ai_cv'])
+                    
+                    sid = p.get('search_id', '')
+                    
+                   # 確保抓到 AI 搜尋到的真實網址
+                    l_url = p.get('link')
+                    if not l_url and 'linkedin_url' in p:
+                        l_url = p['linkedin_url']
+
+                    btn_key = f"url_{sid}_{idx}"
+                    
+                    if l_url or btn_key in st.session_state:
+                        final_url = st.session_state.get(btn_key, l_url)
+                        
+                        # 拿掉 DEMO_MODE 的強制替換，直接使用真實網址
+                        # 這裡只做防呆，萬一真的沒抓到網址才給首頁，避免 Streamlit 報錯
+                        if not final_url or not str(final_url).startswith("http"):
+                            final_url = "https://www.linkedin.com"
+                            
+                        st.link_button("Go to LinkedIn", final_url)
+                    else:
+                        # 解鎖按鈕也用回原本真實的 hidden_url
+                        hidden_url = p.get('linkedin_url', '')
+                        if st.button("Unlock Contact (1 Token)", key=f"un_{sid}_{idx}"):
+                            u_res = requests.post(f"{API_URL}/unlock", json={"search_id": sid, "linkedin_url": hidden_url}, headers=get_auth_headers())
+                            if u_res.status_code == 200:
+                                st.session_state[btn_key] = u_res.json()["url"]
+                                st.session_state.tokens = u_res.json()["tokens_left"]
+                                st.rerun()
+                            else:
+                                st.error("Unlock failed.")
+
+    elif menu == "👤 Account":
+        st.header("Account")
+        st.write("Minimal setup.")
+>>>>>>> Stashed changes
 
 # ==========================================
 # 路由控制總管

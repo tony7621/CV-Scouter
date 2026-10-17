@@ -1,4 +1,9 @@
 import os
+<<<<<<< Updated upstream
+=======
+import json
+import re
+>>>>>>> Stashed changes
 from tavily import TavilyClient
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -18,7 +23,13 @@ LLM_TEMP_REWRITE = 0.4          # 改寫 CV 給一點點彈性，但不要讓它
 TARGET_DOMAIN = "linkedin.com/in/"
 DEFAULT_MAX_RESULTS = 15        # 一次抓 15 筆，CP 值最高 (Tavily 算一次額度)
 
+<<<<<<< Updated upstream
 # [3. 系統提示詞 (System Prompts - 絕對的規則)]
+=======
+# 從環境變數讀取 DEMO_MODE，預設為 False
+DEMO_MODE = os.getenv("DEMO_MODE", "False").lower() in ("true", "1", "t")
+
+>>>>>>> Stashed changes
 SYSTEM_PROMPT_EXTRACT = """
 你是一個極度務實的獵頭演算法。請從 JD 中提取關鍵資訊並組合成一個「高強度搜尋字串」。
 規則：
@@ -30,12 +41,32 @@ SYSTEM_PROMPT_EXTRACT = """
 用空格隔開，絕對不要有任何解釋或標點符號。
 """
 
+# 將原本的 ai_job_title 改為 ai_summary，要求生成一句話總結
 SYSTEM_PROMPT_REWRITE = """
+<<<<<<< Updated upstream
 你是一個專業的招募助理。請將用戶提供的網頁摘要使用與原文相同的語言進行改寫，改寫成 100 字以內的「極簡個人簡歷 (Mini CV)」。
 規則：
 1. 語氣客觀、精煉，條列式呈現核心技能與過去經歷。
 2. 剔除所有無意義的網頁雜訊（如 "View profile", "Contact info"）。
 3. 如果摘要內容太少，就直接總結現有資訊，不要瞎掰。
+=======
+You are a cold, rational recruiting assistant. 
+Output STRICTLY in JSON format: {"ai_summary": "string", "mini_cv": "string", "ai_score": int}
+Rules:
+1. ai_summary: Generate EXACTLY ONE concise sentence summarizing the candidate's core expertise, background, and key achievements.
+2. mini_cv: Under 100 words, highly objective, bullet points of core skills. Remove useless web noise.
+3. ai_score: Integer 0 to 100. Evaluate profile against the provided JD requirements. Be harsh and realistic.
+"""
+
+# DEMO 模式下同樣生成一句話總結，並強制公司名稱打碼
+SYSTEM_PROMPT_REWRITE_DEMO = """
+You are a cold, rational recruiting assistant. 
+Output STRICTLY in JSON format: {"ai_summary": "string", "mini_cv": "string", "ai_score": int}
+Rules:
+1. ai_summary: Generate EXACTLY ONE concise sentence summarizing the candidate's core expertise and background. CRITICAL: You MUST anonymize any real company names (e.g., replace with "[Company]").
+2. mini_cv: Under 100 words, highly objective, bullet points of core skills. Remove useless web noise. CRITICAL: You MUST anonymize all person names and specific company names (e.g., use "Candidate", "Company A").
+3. ai_score: Integer 0 to 100. Evaluate profile against the provided JD requirements. Be harsh and realistic.
+>>>>>>> Stashed changes
 """
 
 # ==========================================
@@ -125,6 +156,7 @@ def perform_scout_task(company: str = "", job_title: str = "", jd_text: str = ""
     
     # C. 執行清洗與 AI 改寫
     final_candidates = []
+<<<<<<< Updated upstream
     for res in raw_results:
         # 提取 1.1 名字 與 1.2 現在的工作
         name, current_job = clean_profile_identity(res.get('title', 'Unknown - Unknown'))
@@ -136,9 +168,36 @@ def perform_scout_task(company: str = "", job_title: str = "", jd_text: str = ""
         ai_cv = rewrite_content_to_cv(res.get('content', ''))
         
         # 組合標準化字典
+=======
+    
+    for idx, res in enumerate(raw_results):
+        # 決定 Prompt 與姓名顯示方式
+        if DEMO_MODE:
+            name = f"Candidate {idx + 1}"
+            current_prompt = SYSTEM_PROMPT_REWRITE_DEMO
+        else:
+            parts = res.get('title', 'Unknown').split('-')
+            name = parts[0].strip()
+            current_prompt = SYSTEM_PROMPT_REWRITE
+            
+        link = res.get('url', '')
+        
+        eval_content = f"Profile:\n{res.get('content', '')}\n\nRequirements:\n{shrink_jd if jd_text else company + ' ' + job_title}"
+        
+        raw_cv, i_tok, o_tok = llm_chat_handler(current_prompt, eval_content, LLM_TEMP_REWRITE, True)
+        total_in += i_tok
+        total_out += o_tok
+        
+        try:
+            ai_eval = json.loads(raw_cv)
+        except:
+            ai_eval = {"ai_summary": "Error processing summary.", "mini_cv": "Error processing profile.", "ai_score": 0}
+            
+>>>>>>> Stashed changes
         final_candidates.append({
             "name": name,
-            "current_job": current_job,
+            # 這裡直接拿 AI 寫好的一句話總結塞進去 UI 原本顯示職位的位置
+            "current_job": ai_eval.get("ai_summary", "Candidate Summary"), 
             "link": link,
             "ai_cv": ai_cv
         })

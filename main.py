@@ -137,9 +137,16 @@ async def run_scout(task: ScoutTask, user_email: str = Depends(get_current_user_
             }).execute()
             
             safe_results.append({
+<<<<<<< Updated upstream
                 "profile_id": cache_res.data[0]["profile_id"], "name": p["name"],
                 "current_job": p["current_job"], "ai_cv": p["ai_cv"],
                 "link": target_url if perm == 1 else "" # 沒買過就清空 URL
+=======
+                "search_id": search_id, "name": p["name"], "current_job": p["current_job"], 
+                "ai_cv": p["ai_cv"], "ai_score": p.get("ai_score", 0),
+                "link": target_url if perm == 1 else "",
+                "linkedin_url": target_url 
+>>>>>>> Stashed changes
             })
         return {"success": True, "tokens_left": new_balance, "results": safe_results, "history_id": history_id}
     except Exception as e:
