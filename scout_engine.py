@@ -1,205 +1,352 @@
 import os
-<<<<<<< Updated upstream
-=======
 import json
-import re
->>>>>>> Stashed changes
+import logging
+from typing import Dict, List, Any
 from tavily import TavilyClient
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 # ==========================================
-# 🎛️ CVScouter 核心控制面板 (隨時可調)
+# Core Configuration & Hyperparameters
 # ==========================================
+LLM_MODEL = "gpt-4o-mini"
+LLM_TEMP_EXTRACT = 0.1
+LLM_TEMP_EVALUATE = 0.1
+LLM_TEMP_REWRITE = 0.1
 
-# [1. API 與模型參數]
-LLM_MODEL = "gpt-4o-mini"       # 務實首選：成本極低，處理文字改寫游刃有餘
-LLM_TEMP_EXTRACT = 0.1          # 提取關鍵字需要極度精準，溫度壓低
-LLM_TEMP_REWRITE = 0.4          # 改寫 CV 給一點點彈性，但不要讓它開始編故事
+LINKEDIN_DOMAIN = "linkedin.com/in/"
+TECH_FOOTPRINT_DOMAINS = ["github.com", "dev.to", "medium.com"]
 
-# [2. 搜尋引擎參數]
-TARGET_DOMAIN = "linkedin.com/in/"
-DEFAULT_MAX_RESULTS = 15        # 一次抓 15 筆，CP 值最高 (Tavily 算一次額度)
+DEFAULT_MAX_RESULTS = 12
+FOOTPRINT_MAX_RESULTS = 3
 
-<<<<<<< Updated upstream
-# [3. 系統提示詞 (System Prompts - 絕對的規則)]
-=======
-# 從環境變數讀取 DEMO_MODE，預設為 False
+# Scoring Weights for Phase 3 (Comprehensive Weight Calculation)
+WEIGHT_GROUP_RELATIVE = 0.30
+WEIGHT_INDIVIDUAL_ABSOLUTE = 0.70
+MIN_PRE_SCREEN_SCORE = 35
+
+# Read DEMO_MODE from environment variables (defaults to False)
 DEMO_MODE = os.getenv("DEMO_MODE", "False").lower() in ("true", "1", "t")
 
->>>>>>> Stashed changes
+# ==========================================
+# System Prompts
+# ==========================================
 SYSTEM_PROMPT_EXTRACT = """
-你是一個極度務實的獵頭演算法。請從 JD 中提取關鍵資訊並組合成一個「高強度搜尋字串」。
-規則：
-1. 包含核心職稱 (必備)。
-2. 包含核心技術或產業關鍵字 (如 FMCG, java)。
-3. 包含地點約束 (如 香港 或 Taiwan)。
-4. 必須加上排除詞以減少雜訊：-業務 -Sales -Marketing -工程師 -Teacher -Philips。
-5. 輸出格式：只輸出組合成的搜尋字串，不要任何解釋。
-用空格隔開，絕對不要有任何解釋或標點符號。
+You are a highly pragmatic headhunting algorithm.
+Output STRICTLY in JSON format: {"search_string": "string", "shrink_jd": "string"}
+Rules:
+1. search_string: Must include Location, Job Title, and 2-3 core skills. Add negative keywords (e.g. -Sales -Marketing).
+2. shrink_jd: Compress the JD into under 50 words. Focus ONLY on hard requirements (Must-haves) and core tech stack. No fluff.
 """
 
-# 將原本的 ai_job_title 改為 ai_summary，要求生成一句話總結
+SYSTEM_PROMPT_GROUP_EVAL = """
+You are an objective technical recruiting lead conducting Phase 1 Rapid Pre-screening and Group Relative Scoring.
+Compare all candidate snippets horizontally against the provided JD requirements.
+Output STRICTLY in JSON format:
+{
+  "evaluations": [
+    {
+      "candidate_id": int,
+      "relative_score": int,
+      "is_shortlisted": bool
+    }
+  ]
+}
+Rules:
+1. relative_score: Integer 0 to 100 based on how each candidate ranks relative to the overall quality of this specific batch.
+2. is_shortlisted: Set to false ONLY if the candidate is completely irrelevant or has severe, unbridgeable experience gaps.
+"""
+
 SYSTEM_PROMPT_REWRITE = """
-<<<<<<< Updated upstream
-你是一個專業的招募助理。請將用戶提供的網頁摘要使用與原文相同的語言進行改寫，改寫成 100 字以內的「極簡個人簡歷 (Mini CV)」。
-規則：
-1. 語氣客觀、精煉，條列式呈現核心技能與過去經歷。
-2. 剔除所有無意義的網頁雜訊（如 "View profile", "Contact info"）。
-3. 如果摘要內容太少，就直接總結現有資訊，不要瞎掰。
-=======
-You are a cold, rational recruiting assistant. 
+You are a cold, rational recruiting assistant conducting an independent 1-on-1 candidate evaluation.
 Output STRICTLY in JSON format: {"ai_summary": "string", "mini_cv": "string", "ai_score": int}
 Rules:
 1. ai_summary: Generate EXACTLY ONE concise sentence summarizing the candidate's core expertise, background, and key achievements.
-2. mini_cv: Under 100 words, highly objective, bullet points of core skills. Remove useless web noise.
-3. ai_score: Integer 0 to 100. Evaluate profile against the provided JD requirements. Be harsh and realistic.
+2. mini_cv: Under 100 words, highly objective, bullet points of core skills. Remove useless web noise. If a specific skill is not explicitly mentioned in the resume, you are strictly prohibited from inferring or fabricating it.
+3. ai_score: Integer 0 to 100. Evaluate this individual profile strictly against the provided JD requirements. Be harsh and realistic.
 """
 
-# DEMO 模式下同樣生成一句話總結，並強制公司名稱打碼
 SYSTEM_PROMPT_REWRITE_DEMO = """
-You are a cold, rational recruiting assistant. 
+You are a cold, rational recruiting assistant conducting an independent 1-on-1 candidate evaluation.
 Output STRICTLY in JSON format: {"ai_summary": "string", "mini_cv": "string", "ai_score": int}
 Rules:
 1. ai_summary: Generate EXACTLY ONE concise sentence summarizing the candidate's core expertise and background. CRITICAL: You MUST anonymize any real company names (e.g., replace with "[Company]").
-2. mini_cv: Under 100 words, highly objective, bullet points of core skills. Remove useless web noise. CRITICAL: You MUST anonymize all person names and specific company names (e.g., use "Candidate", "Company A").
-3. ai_score: Integer 0 to 100. Evaluate profile against the provided JD requirements. Be harsh and realistic.
->>>>>>> Stashed changes
+2. mini_cv: Under 100 words, highly objective, bullet points of core skills. Remove useless web noise. If a specific skill is not explicitly mentioned in the resume, you are strictly prohibited from inferring or fabricating it. CRITICAL: You MUST anonymize all person names and specific company names (e.g., use "Candidate", "Company A").
+3. ai_score: Integer 0 to 100. Evaluate this individual profile strictly against the provided JD requirements. Be harsh and realistic.
 """
 
-# ==========================================
-# 啟動 API 客戶端
-# ==========================================
 tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-# ------------------------------------------
-# 🛠️ 1. 工具層：底層對接機器
-# ------------------------------------------
-def llm_chat_handler(system_prompt: str, user_content: str, temperature: float) -> str:
-    """雙通道 AI 呼叫器：System 管規則，User 丟資料"""
-    response = openai_client.chat.completions.create(
-        model=LLM_MODEL,
-        temperature=temperature,
-        messages=[
+def llm_chat_handler(
+    system_prompt: str,
+    user_content: str,
+    temperature: float,
+    json_mode: bool = False
+) -> tuple[str, int, int]:
+    """Executes an OpenAI Chat Completion call and tracks token usage."""
+    kwargs: Dict[str, Any] = {
+        "model": LLM_MODEL,
+        "temperature": temperature,
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ]
-    )
-    return response.choices[0].message.content.strip()
+    }
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
 
-def tavily_search_engine(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list:
-    """通用 Tavily 搜尋器，只負責把 JSON 拔回來"""
-    full_query = f"site:{TARGET_DOMAIN} {query}"
-    search_result = tavily.search(
-        query=full_query, 
-        search_depth="basic", 
-        max_results=max_results
-    )
-    return search_result.get('results', [])
+    response = openai_client.chat.completions.create(**kwargs)
+    content = response.choices[0].message.content.strip()
+    in_tokens = response.usage.prompt_tokens if response.usage else 0
+    out_tokens = response.usage.completion_tokens if response.usage else 0
+    return content, in_tokens, out_tokens
 
 
-# ------------------------------------------
-# 🧠 2. 邏輯層：資料加工機器
-# ------------------------------------------
-def extract_keywords_from_jd(jd_text: str) -> str:
-    """[模式二專用] 將長篇 JD 脫水成搜尋字串"""
-    # 規則傳 System，JD 內容傳 User
-    return llm_chat_handler(SYSTEM_PROMPT_EXTRACT, jd_text, temperature=LLM_TEMP_EXTRACT)
-
-def clean_profile_identity(title: str):
-    """[通用] 暴力切開 LinkedIn 網頁標題，提取乾淨的姓名與現職"""
-    # 範例輸入: "Katie Humphreys - Senior Recruiter at Google - LinkedIn"
-    parts = title.split('-')
-    name = parts[0].strip()
-    
-    # 嘗試抓取職稱，如果格式太亂就回傳 N/A
-    current_job = parts[1].strip() if len(parts) > 1 else "N/A"
-    
-    # 清理殘留的 " | LinkedIn" 等字眼
-    current_job = current_job.replace(" | LinkedIn", "").replace("...", "").strip()
-    return name, current_job
-
-def rewrite_content_to_cv(content: str) -> str:
-    """[核心價值] 將 100 字的網頁雜亂摘要，洗成專業的 Mini CV"""
-    if not content or len(content) < 10:
-        return "無足夠公開資訊可供總結。"
-        
-    # 規則傳 System，雜亂摘要傳 User
-    return llm_chat_handler(SYSTEM_PROMPT_REWRITE, content, temperature=LLM_TEMP_REWRITE)
+def extract_candidate_name(title: str) -> str:
+    """Extracts a clean candidate name from a search result title."""
+    if not title:
+        return "Unknown"
+    parts = title.split("-")[0].split("|")[0].strip()
+    return parts if parts else "Unknown"
 
 
-# ------------------------------------------
-# 🎮 3. 總管層：唯一對外接口 (給 main.py 呼叫)
-# ------------------------------------------
-def perform_scout_task(company: str = "", job_title: str = "", jd_text: str = "") -> list:
+def retrieve_cross_platform_candidates(search_query: str) -> List[Dict[str, Any]]:
     """
-    雙軌並行總管：判斷要走「JD 模式」還是「公司快查模式」，
-    並強制產出規格化的 4 個欄位 (name, current_job, link, ai_cv)。
+    Executes cross-domain RAG retrieval:
+    1. Searches LinkedIn directly for matching candidate profiles.
+    2. Scans technical communities (GitHub, Dev.to, Medium) for real technical footprints,
+       then performs Identity Resolution to reverse-map footprints back to LinkedIn profiles.
     """
-    
-    # A. 判斷搜尋指令 (A/B 策略路由)
-    if jd_text:
-        # 走 JD 提取邏輯
-        search_query = extract_keywords_from_jd(jd_text)
-    elif company and job_title:
-        # 走精準公司鎖定邏輯
-        search_query = f'"{company}" "{job_title}"'
+    merged_results: Dict[str, Dict[str, Any]] = {}
+
+    # Step 1: Primary LinkedIn Profile Retrieval
+    linkedin_query = f"site:{LINKEDIN_DOMAIN} {search_query}"
+    try:
+        li_response = tavily.search(
+            query=linkedin_query,
+            search_depth="basic",
+            max_results=DEFAULT_MAX_RESULTS
+        )
+        for item in li_response.get("results", []):
+            url = item.get("url", "")
+            if LINKEDIN_DOMAIN in url and url not in merged_results:
+                merged_results[url] = {
+                    "title": item.get("title", "Unknown"),
+                    "url": url,
+                    "content": item.get("content", ""),
+                    "source": "linkedin"
+                }
+    except Exception as exc:
+        logger.warning("Primary LinkedIn search encountered an error: %s", exc)
+
+    # Step 2: Cross-Platform Technical Footprint Discovery & Identity Resolution
+    domain_filter = " OR ".join([f"site:{d}" for d in TECH_FOOTPRINT_DOMAINS])
+    footprint_query = f"({domain_filter}) {search_query}"
+    try:
+        fp_response = tavily.search(
+            query=footprint_query,
+            search_depth="basic",
+            max_results=FOOTPRINT_MAX_RESULTS
+        )
+        for fp_item in fp_response.get("results", []):
+            candidate_handle = extract_candidate_name(fp_item.get("title", ""))
+            fp_snippet = fp_item.get("content", "")
+            if not candidate_handle or candidate_handle.lower() in ("unknown", "github"):
+                continue
+
+            # Identity Resolution: Reverse-map technical footprint to a LinkedIn Profile
+            resolution_query = f'site:{LINKEDIN_DOMAIN} "{candidate_handle}" {search_query}'
+            res_lookup = tavily.search(
+                query=resolution_query,
+                search_depth="basic",
+                max_results=1
+            )
+            resolved_hits = res_lookup.get("results", [])
+            if resolved_hits:
+                li_hit = resolved_hits[0]
+                li_url = li_hit.get("url", "")
+                if LINKEDIN_DOMAIN in li_url:
+                    if li_url in merged_results:
+                        # Enrich existing LinkedIn profile with external technical footprint
+                        merged_results[li_url]["content"] += f"\n[External Tech Footprint]: {fp_snippet}"
+                    else:
+                        merged_results[li_url] = {
+                            "title": li_hit.get("title", candidate_handle),
+                            "url": li_url,
+                            "content": f"{li_hit.get('content', '')}\n[External Tech Footprint]: {fp_snippet}",
+                            "source": "cross_domain_resolved"
+                        }
+    except Exception as exc:
+        logger.warning("Cross-domain footprint resolution skipped due to error: %s", exc)
+
+    return list(merged_results.values())[:DEFAULT_MAX_RESULTS]
+
+
+def perform_scout_task(company: str = "", job_title: str = "", jd_text: str = "") -> Dict[str, Any]:
+    """
+    Main pipeline orchestrating JD extraction, cross-domain retrieval,
+    and the 2-stage Dual Comparison evaluation mechanism.
+    """
+    total_in = 0
+    total_out = 0
+    extracted_keywords = ""
+    shrink_jd = ""
+
+    # ==========================================
+    # Step 1: In-Depth JD Extraction & Compression
+    # ==========================================
+    if jd_text and jd_text.strip():
+        try:
+            raw_res, i_tok, o_tok = llm_chat_handler(
+                SYSTEM_PROMPT_EXTRACT, jd_text, LLM_TEMP_EXTRACT, json_mode=True
+            )
+            total_in += i_tok
+            total_out += o_tok
+            parsed = json.loads(raw_res)
+            extracted_keywords = parsed.get("search_string", "").strip()
+            shrink_jd = parsed.get("shrink_jd", "").strip()
+        except (json.JSONDecodeError, Exception) as exc:
+            logger.error("JD Extraction failed: %s", exc)
+            return {"error": "AI Extraction Failed."}
+
+        if not extracted_keywords:
+            return {"error": "Failed to extract valid search keywords from JD."}
+        search_query = extracted_keywords
+        target_requirements = shrink_jd
+
+    elif company and company.strip():
+        clean_company = company.strip()
+        clean_title = job_title.strip() if job_title else ""
+        search_query = f'"{clean_company}" "{clean_title}"'.strip() if clean_title else f'"{clean_company}"'
+        target_requirements = f"{clean_company} {clean_title}".strip()
     else:
-        return [{"error": "請提供 JD 或 (公司+職位) 參數"}]
+        return {"error": "Missing search parameters. Please provide a JD or Company name."}
 
-    # B. 執行抓取
-    raw_results = tavily_search_engine(search_query)
-    
-    # C. 執行清洗與 AI 改寫
-    final_candidates = []
-<<<<<<< Updated upstream
-    for res in raw_results:
-        # 提取 1.1 名字 與 1.2 現在的工作
-        name, current_job = clean_profile_identity(res.get('title', 'Unknown - Unknown'))
-        
-        # 提取 1.3 連結
-        link = res.get('url', '')
-        
-        # 提取 1.4 AI 改寫 CV (消耗 OpenAI Token 的地方)
-        ai_cv = rewrite_content_to_cv(res.get('content', ''))
-        
-        # 組合標準化字典
-=======
-    
+    # ==========================================
+    # Step 2: Cross-Platform RAG Retrieval
+    # ==========================================
+    raw_results = retrieve_cross_platform_candidates(search_query)
+    if not raw_results:
+        return {
+            "candidates": [],
+            "tavily_raw_data": [],
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
+            "extracted_keywords": extracted_keywords,
+            "shrink_jd": shrink_jd
+        }
+
+    # ==========================================
+    # Step 3: Multi-Stage AI Evaluation Mechanism
+    # Phase 1 - Rapid Pre-screening & Group Relative Scoring
+    # ==========================================
+    batch_overview = []
     for idx, res in enumerate(raw_results):
-        # 決定 Prompt 與姓名顯示方式
-        if DEMO_MODE:
-            name = f"Candidate {idx + 1}"
-            current_prompt = SYSTEM_PROMPT_REWRITE_DEMO
-        else:
-            parts = res.get('title', 'Unknown').split('-')
-            name = parts[0].strip()
-            current_prompt = SYSTEM_PROMPT_REWRITE
-            
-        link = res.get('url', '')
-        
-        eval_content = f"Profile:\n{res.get('content', '')}\n\nRequirements:\n{shrink_jd if jd_text else company + ' ' + job_title}"
-        
-        raw_cv, i_tok, o_tok = llm_chat_handler(current_prompt, eval_content, LLM_TEMP_REWRITE, True)
+        batch_overview.append({
+            "candidate_id": idx,
+            "title": res.get("title", ""),
+            "snippet": res.get("content", "")[:400]
+        })
+
+    group_eval_input = (
+        f"Job Requirements:\n{target_requirements}\n\n"
+        f"Candidates Batch:\n{json.dumps(batch_overview, ensure_ascii=False)}"
+    )
+
+    relative_scores_map: Dict[int, int] = {}
+    shortlisted_indices: List[int] = []
+
+    try:
+        group_raw, i_tok, o_tok = llm_chat_handler(
+            SYSTEM_PROMPT_GROUP_EVAL, group_eval_input, LLM_TEMP_EVALUATE, json_mode=True
+        )
         total_in += i_tok
         total_out += o_tok
-        
+        group_parsed = json.loads(group_raw)
+
+        for item in group_parsed.get("evaluations", []):
+            cid = item.get("candidate_id")
+            rel_score = int(item.get("relative_score", 50))
+            is_shortlisted = bool(item.get("is_shortlisted", True))
+
+            if isinstance(cid, int) and 0 <= cid < len(raw_results):
+                relative_scores_map[cid] = max(0, min(100, rel_score))
+                if is_shortlisted and rel_score >= MIN_PRE_SCREEN_SCORE:
+                    shortlisted_indices.append(cid)
+    except (json.JSONDecodeError, Exception) as exc:
+        logger.warning("Phase 1 Group Evaluation fallback triggered: %s", exc)
+
+    # Fallback: if Phase 1 filtered out everyone or failed, evaluate all retrieved candidates
+    if not shortlisted_indices:
+        shortlisted_indices = list(range(len(raw_results)))
+        for idx in shortlisted_indices:
+            relative_scores_map.setdefault(idx, 60)
+
+    # ==========================================
+    # Phase 2 - In-Depth 1-on-1 Individual Absolute Scoring
+    # & Phase 3 - Comprehensive Weight Calculation
+    # ==========================================
+    final_candidates = []
+    current_rewrite_prompt = SYSTEM_PROMPT_REWRITE_DEMO if DEMO_MODE else SYSTEM_PROMPT_REWRITE
+
+    for display_idx, cand_idx in enumerate(shortlisted_indices):
+        res = raw_results[cand_idx]
+        name = f"Candidate {display_idx + 1}" if DEMO_MODE else extract_candidate_name(res.get("title", "Unknown"))
+        link = res.get("url", "")
+
+        # Isolated 1-on-1 prompt context to prevent attention confusion and scoring drift
+        eval_content = (
+            f"Candidate Profile & Technical Footprint:\n{res.get('content', '')}\n\n"
+            f"Target Requirements:\n{target_requirements}"
+        )
+
         try:
+            raw_cv, i_tok, o_tok = llm_chat_handler(
+                current_rewrite_prompt, eval_content, LLM_TEMP_REWRITE, json_mode=True
+            )
+            total_in += i_tok
+            total_out += o_tok
             ai_eval = json.loads(raw_cv)
-        except:
-            ai_eval = {"ai_summary": "Error processing summary.", "mini_cv": "Error processing profile.", "ai_score": 0}
-            
->>>>>>> Stashed changes
+        except (json.JSONDecodeError, Exception) as exc:
+            logger.error("Phase 2 Individual Evaluation failed for candidate %d: %s", cand_idx, exc)
+            ai_eval = {
+                "ai_summary": "Error processing candidate summary.",
+                "mini_cv": "Error processing candidate profile.",
+                "ai_score": 0
+            }
+
+        # Phase 3: Weighted Average of Group Relative Score & Individual Absolute Score
+        absolute_score = int(ai_eval.get("ai_score", 0))
+        relative_score = relative_scores_map.get(cand_idx, absolute_score)
+        weighted_score = round(
+            (relative_score * WEIGHT_GROUP_RELATIVE) +
+            (absolute_score * WEIGHT_INDIVIDUAL_ABSOLUTE)
+        )
+        final_score = max(0, min(100, weighted_score))
+
         final_candidates.append({
             "name": name,
-            # 這裡直接拿 AI 寫好的一句話總結塞進去 UI 原本顯示職位的位置
-            "current_job": ai_eval.get("ai_summary", "Candidate Summary"), 
+            "current_job": ai_eval.get("ai_summary", "Candidate Summary"),
             "link": link,
-            "ai_cv": ai_cv
+            "ai_cv": ai_eval.get("mini_cv", ""),
+            "ai_score": final_score
         })
-        
-    return final_candidates
+
+    # Sort candidates by final weighted score descending
+    final_candidates.sort(key=lambda x: x.get("ai_score", 0), reverse=True)
+
+    return {
+        "candidates": final_candidates,
+        "tavily_raw_data": raw_results,
+        "total_input_tokens": total_in,
+        "total_output_tokens": total_out,
+        "extracted_keywords": extracted_keywords,
+        "shrink_jd": shrink_jd
+    }
