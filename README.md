@@ -1,5 +1,3 @@
-<video src="./cv_scouter%20demo.mp4" controls="controls" width="100%"></video>
-
 # 🔍 CVScouter – AI-Driven Candidate Sourcing Agent (PoC)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
@@ -8,6 +6,18 @@
 ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E)
 ![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991)
 ![Tavily](https://img.shields.io/badge/Tavily-RAG_Search-orange)
+
+---
+
+### 🎥 System Demo
+
+
+https://github.com/user-attachments/assets/2a0028af-4a7d-4a11-936a-5809c1453acd
+
+<video src="./cv_scouter%20demo.mp4" controls="controls" width="100%"></video>
+
+
+---
 
 ## 📌 1. Overview & Business Impact
 
