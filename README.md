@@ -1,3 +1,5 @@
+<video src="./cv_scouter%20demo.mp4" controls="controls" width="100%"></video>
+
 # 🔍 CVScouter – AI-Driven Candidate Sourcing Agent (PoC)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
