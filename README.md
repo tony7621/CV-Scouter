@@ -6,7 +6,8 @@
 ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E)
 ![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991)
 ![Tavily](https://img.shields.io/badge/Tavily-RAG_Search-orange)
-
+![Render](https://img.shields.io/badge/Render-Deployment-46E3B7)
+![Streamlit Community Cloud](https://img.shields.io/badge/Streamlit%20Community%20Cloud-Hosting-FF4B4B)
 ---
 
 ### 🎥 System Demo
